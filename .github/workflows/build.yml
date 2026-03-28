@@ -18,8 +18,11 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
+    # در اینجا نسخه پایدار 8.7 را مشخص کردیم
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.7'
 
     - name: Build APK
       run: gradle :app:assembleDebug
