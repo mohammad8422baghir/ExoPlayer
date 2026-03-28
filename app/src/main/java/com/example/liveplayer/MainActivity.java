@@ -15,7 +15,7 @@ import androidx.media3.database.StandaloneDatabaseProvider;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.cache.CacheDataSource;
-import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictionEvaluator;
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor;
 import androidx.media3.datasource.cache.SimpleCache;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -84,9 +84,10 @@ public class MainActivity extends Activity {
         menuLayout.setVisibility(View.GONE);
         playerView.setVisibility(View.VISIBLE);
 
-        // تنظیمات حافظه پنهان (حداکثر 50 مگابایت، فایل‌های قدیمی خودکار پاک می‌شوند)
+        // تنظیمات حافظه پنهان با استفاده از کلاس جدید
         File cacheDir = new File(getCacheDir(), "media_cache");
-        simpleCache = new SimpleCache(cacheDir, new LeastRecentlyUsedCacheEvictionEvaluator(50 * 1024 * 1024), new StandaloneDatabaseProvider(this));
+        simpleCache = new SimpleCache(cacheDir, new LeastRecentlyUsedCacheEvictor(50 * 1024 * 1024), new StandaloneDatabaseProvider(this));
+        
         DataSource.Factory dataSourceFactory = new CacheDataSource.Factory()
                 .setCache(simpleCache)
                 .setUpstreamDataSourceFactory(new DefaultHttpDataSource.Factory());
@@ -114,7 +115,6 @@ public class MainActivity extends Activity {
 
         playerView.setPlayer(player);
 
-        // آپدیت متن دانلود در حالت پایدار
         if (isBufferedMode) {
             player.addListener(new Player.Listener() {
                 @Override
@@ -130,7 +130,7 @@ public class MainActivity extends Activity {
             });
         }
 
-        // آدرس Master Playlist جدید
+        // آدرس Master Playlist
         String liveUrl = "http://45.76.93.249/live/master.m3u8";
         player.setMediaItem(MediaItem.fromUri(liveUrl));
         player.prepare();
