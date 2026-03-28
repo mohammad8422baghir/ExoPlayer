@@ -40,22 +40,28 @@ public class MainActivity extends Activity {
     private PlayerView playerView;
     private LinearLayout loadingLayout;
     private TextView loadingText;
-    private ProgressBar progressBar;
+    private Button btnBackOverlay;
     private Handler handler = new Handler(Looper.getMainLooper());
     private Runnable updateProgressRunnable;
 
     private int selectedQuality = 240;
     private int selectedBitrate = 132;
-    private long maxBufferedSoFar = 0; // برای جلوگیری از صفر شدن عدد هنگام قطعی
+    private long maxBufferedSoFar = 0;
+    private String liveUrl = "http://45.76.93.249/live/master.m3u8";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         cleanOldCache();
 
+        // مقداردهی حافظه کش به صورت سراسری تا در باز و بسته کردن پلیر باگ نخورد
+        File cacheDir = new File(getCacheDir(), "media_cache");
+        simpleCache = new SimpleCache(cacheDir, new LeastRecentlyUsedCacheEvictor(100 * 1024 * 1024), new StandaloneDatabaseProvider(this));
+
         FrameLayout rootLayout = new FrameLayout(this);
         rootLayout.setBackgroundColor(Color.parseColor("#121212"));
 
+        // --- منوی اصلی ---
         menuLayout = new LinearLayout(this);
         menuLayout.setOrientation(LinearLayout.VERTICAL);
         menuLayout.setGravity(Gravity.CENTER);
@@ -79,17 +85,34 @@ public class MainActivity extends Activity {
         menuLayout.addView(btnLive);
         menuLayout.addView(btnBuffer);
 
+        // --- پلیر ---
         playerView = new PlayerView(this);
         playerView.setVisibility(View.GONE);
         playerView.setBackgroundColor(Color.BLACK);
-        
+
+        // --- دکمه بازگشت روی تصویر ---
+        btnBackOverlay = new Button(this);
+        btnBackOverlay.setText("⬅ بازگشت");
+        btnBackOverlay.setTextColor(Color.WHITE);
+        btnBackOverlay.setBackgroundColor(Color.parseColor("#80000000"));
+        btnBackOverlay.setPadding(30, 10, 30, 10);
+        btnBackOverlay.setVisibility(View.GONE);
+        btnBackOverlay.setOnClickListener(v -> stopAndReturnToMenu());
+
+        FrameLayout.LayoutParams backParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        backParams.gravity = Gravity.TOP | Gravity.LEFT;
+        backParams.setMargins(40, 80, 0, 0);
+        btnBackOverlay.setLayoutParams(backParams);
+
+        // --- صفحه لودینگ ---
         loadingLayout = new LinearLayout(this);
         loadingLayout.setOrientation(LinearLayout.VERTICAL);
         loadingLayout.setGravity(Gravity.CENTER);
         loadingLayout.setBackgroundColor(Color.parseColor("#E6000000"));
         loadingLayout.setVisibility(View.GONE);
 
-        progressBar = new ProgressBar(this);
+        ProgressBar progressBar = new ProgressBar(this);
         loadingText = new TextView(this);
         loadingText.setTextColor(Color.WHITE);
         loadingText.setTextSize(16);
@@ -99,9 +122,11 @@ public class MainActivity extends Activity {
         loadingLayout.addView(progressBar);
         loadingLayout.addView(loadingText);
 
+        // --- افزودن به صفحه اصلی ---
         rootLayout.addView(playerView, new FrameLayout.LayoutParams(-1, -1));
-        rootLayout.addView(menuLayout, new FrameLayout.LayoutParams(-1, -1));
         rootLayout.addView(loadingLayout, new FrameLayout.LayoutParams(-1, -1));
+        rootLayout.addView(btnBackOverlay); // روی همه چیز قرار می‌گیرد
+        rootLayout.addView(menuLayout, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(rootLayout);
     }
@@ -129,7 +154,7 @@ public class MainActivity extends Activity {
     private void showQualityDialog(boolean isBufferedMode) {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("تنظیمات کیفیت");
-        builder.setMessage("کیفیت پیش‌فرض روی 240p (بهینه برای اینترنت ضعیف) تنظیم شده است.\nآیا مایل به تغییر آن هستید؟");
+        builder.setMessage("کیفیت پیش‌فرض روی 240p تنظیم شده است.\nآیا مایل به تغییر آن هستید؟");
         
         builder.setPositiveButton("پخش مستقیم", (dialog, which) -> {
             selectedQuality = 240;
@@ -140,7 +165,7 @@ public class MainActivity extends Activity {
         builder.setNegativeButton("تغییر کیفیت", (dialog, which) -> {
             String[] qualities = {"144p (بسیار کم‌حجم)", "240p (پیشنهادی)", "360p (کیفیت بالا)"};
             AlertDialog.Builder qBuilder = new AlertDialog.Builder(this);
-            qBuilder.setTitle("یک کیفیت را انتخاب کنید:");
+            qBuilder.setTitle("انتخاب کیفیت:");
             qBuilder.setItems(qualities, (dialogInterface, i) -> {
                 if (i == 0) { selectedQuality = 144; selectedBitrate = 66; }
                 else if (i == 1) { selectedQuality = 240; selectedBitrate = 132; }
@@ -159,23 +184,48 @@ public class MainActivity extends Activity {
         }
     }
 
+    // متد خروج از پلیر و بازگشت به منو
+    private void stopAndReturnToMenu() {
+        if (handler != null && updateProgressRunnable != null) {
+            handler.removeCallbacks(updateProgressRunnable);
+        }
+        if (player != null) {
+            player.stop();
+            player.release();
+            player = null;
+        }
+        playerView.setVisibility(View.GONE);
+        btnBackOverlay.setVisibility(View.GONE);
+        loadingLayout.setVisibility(View.GONE);
+        menuLayout.setVisibility(View.VISIBLE);
+    }
+
+    // کنترل دکمه Back فیزیکی گوشی
+    @Override
+    public void onBackPressed() {
+        if (menuLayout.getVisibility() == View.GONE) {
+            stopAndReturnToMenu();
+        } else {
+            super.onBackPressed();
+        }
+    }
+
     private void startStream(boolean isBufferedMode) {
         menuLayout.setVisibility(View.GONE);
         playerView.setVisibility(View.VISIBLE);
-        maxBufferedSoFar = 0; // ریست کردن برای شروع جدید
+        btnBackOverlay.setVisibility(View.VISIBLE);
+        maxBufferedSoFar = 0;
 
-        File cacheDir = new File(getCacheDir(), "media_cache");
-        simpleCache = new SimpleCache(cacheDir, new LeastRecentlyUsedCacheEvictor(100 * 1024 * 1024), new StandaloneDatabaseProvider(this));
-        
-        // افزایش تایم‌اوت برای اینترنت‌های نوسان‌دار (۲۰ ثانیه)
+        // تنظیمات اتصال تهاجمی برای رفع فریز اینترنت
         DefaultHttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSource.Factory()
-                .setConnectTimeoutMs(20000)
-                .setReadTimeoutMs(20000)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(15000)
                 .setAllowCrossProtocolRedirects(true);
 
         DataSource.Factory dataSourceFactory = new CacheDataSource.Factory()
                 .setCache(simpleCache)
-                .setUpstreamDataSourceFactory(httpDataSourceFactory);
+                .setUpstreamDataSourceFactory(httpDataSourceFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR); // چشم پوشی از فایل خراب
 
         DefaultTrackSelector trackSelector = new DefaultTrackSelector(this);
         trackSelector.setParameters(trackSelector.buildUponParameters().setMaxVideoSize(Integer.MAX_VALUE, selectedQuality).build());
@@ -216,13 +266,10 @@ public class MainActivity extends Activity {
                         long bufferedMs = player.getTotalBufferedDuration();
                         long bufferedSec = bufferedMs / 1000;
                         
-                        // جلوگیری از صفر شدن عدد هنگام قطعی
-                        if (bufferedSec > maxBufferedSoFar) {
-                            maxBufferedSoFar = bufferedSec;
-                        }
+                        if (bufferedSec > maxBufferedSoFar) { maxBufferedSoFar = bufferedSec; }
 
                         if (player.getPlaybackState() == Player.STATE_IDLE) {
-                            loadingText.setText("ارتباط اینترنت بسیار ضعیف است...\nدر حال تلاش مجدد برای اتصال...");
+                            loadingText.setText("اختلال در اتصال وی‌پی‌ان...\nدر حال تلاش مجدد برای دریافت فایل...");
                         } else {
                             double downloadedKb = (maxBufferedSoFar * (selectedBitrate / 8.0));
                             String sizeTxt = downloadedKb > 1024 ? 
@@ -236,6 +283,7 @@ public class MainActivity extends Activity {
 
                         if (maxBufferedSoFar >= finalTarget || player.getPlaybackState() == Player.STATE_READY) {
                             loadingLayout.setVisibility(View.GONE);
+                            btnBackOverlay.setVisibility(View.GONE); // پس از شروع پخش، دکمه محو می‌شود (با کلیک روی صفحه ظاهر می‌شود)
                         } else {
                             handler.postDelayed(this, 1000);
                         }
@@ -250,29 +298,31 @@ public class MainActivity extends Activity {
             public void onPlaybackStateChanged(int playbackState) {
                 if (playbackState == Player.STATE_READY && loadingLayout.getVisibility() == View.VISIBLE) {
                     loadingLayout.setVisibility(View.GONE);
+                    btnBackOverlay.setVisibility(View.GONE);
                 }
             }
 
-            // سیستم هوشمند اتصال مجدد در صورت قطعی اینترنت
+            // --- سیستم هوشمند و قدرتمند احیای اتصال (مخصوص اینترنت ایران) ---
             @Override
             public void onPlayerError(PlaybackException error) {
                 if (loadingLayout.getVisibility() == View.VISIBLE) {
-                    loadingText.setText("اختلال موقت در اینترنت!\nدر حال برقراری مجدد ارتباط...");
+                    loadingText.setText("ارتباط قطع شد!\nدر حال تازه سازی مسیر استریم...");
                 }
                 
-                // بعد از 3 ثانیه به طور خودکار دوباره تلاش می کند
                 handler.postDelayed(() -> {
                     if (player != null) {
-                        if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
-                            player.seekToDefaultPosition();
-                        }
+                        // ترفند حیاتی: پاک کردن مدیا آیتم و ست کردن دوباره آن برای دور زدن فریز شدن سوکت
+                        player.stop();
+                        player.clearMediaItems();
+                        player.setMediaItem(MediaItem.fromUri(liveUrl));
                         player.prepare();
+                        player.setPlayWhenReady(true);
                     }
-                }, 3000);
+                }, 4000); // 4 ثانیه صبر برای اتصال مجدد وی پی ان
             }
         });
 
-        String liveUrl = "http://45.76.93.249/live/master.m3u8";
+        // آدرس سرور (توجه: در متغیرهای بالا هم تعریف شده)
         player.setMediaItem(MediaItem.fromUri(liveUrl));
         player.prepare();
         player.setPlayWhenReady(true);
@@ -296,6 +346,6 @@ public class MainActivity extends Activity {
             handler.removeCallbacks(updateProgressRunnable);
         }
         if (player != null) { player.release(); }
-        if (simpleCache != null) { simpleCache.release(); }
+        if (simpleCache != null) { simpleCache.release(); } // فقط در زمان بسته شدن کامل برنامه پاک شود
     }
 }
